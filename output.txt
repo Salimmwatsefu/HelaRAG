@@ -1,0 +1,40 @@
+Running pipeline...
+Loading reviews...
+Loaded 8393 reviews
+Loading FAISS index...
+Retrieving reviews...
+Retrieving reviews...
+Retrieved indices: [7080 5153 2220  652 6061 8119 5814  385 1528 6899]
+Retrieved documents: ['customer service could be improved', 'This app delivers a horrible experience.', 'fantastic in helping clients get what they want.', 'thanks for supporting me in my business', 'The best financial app on the market.', 'Great experience in this bank service', 'best pay app. Customer service is awesome', 'Not aware how it operates.', 'It is the best online shopping app', 'the customer support is amazing 👍']
+Generating for: How do users feel about customer service?
+Context used: customer service could be improved
+This app delivers a horrible experience.
+fantastic in helping clients get what they want.
+thanks for supporting me in my business
+The best financial app on the market.
+Great experience in this bank service
+best pay app. Customer service is awesome
+Not aware how it operates.
+It is the best online shopping app
+the customer support is amazing 👍
+Prompt: Here are some user reviews about customer service:
+
+customer service could be improved
+This app delivers a horrible experience.
+fantastic in helping clients get what they want.
+thanks for supporting me in my business
+The best financial app on the market.
+Great experience in this bank service
+best pay app. Customer service is awesome
+Not aware how it operates.
+It is the best online shopping app
+the customer support is amazing 👍
+
+Please provide a detailed summary of how users feel about customer service, mentioning both positive and negative aspects. Write at least 3 sentences.
+
+Summary: <extra_id_0>
+
+Raw response: <pad> <extra_id_0> Customer Service</s>
+Response: Customer Service</s>
+Response: Customer Service</s>
+Scores: {'score': 0.9}

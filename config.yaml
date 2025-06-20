@@ -1,0 +1,23 @@
+model:
+  embedding_model: "xlm-roberta-base"
+  generation_model: "google/mt5-small"
+
+data:
+  reviews_path: "data/raw/reviews.csv"
+  embeddings_path: "data/processed/embeddings.faiss"
+
+retrieval:
+  top_k: 10
+
+generation:
+  max_length: 200
+  temperature: 0.7
+  prompt_template: |
+    Here are some user reviews about customer service:
+
+    {context}
+
+    Please provide a detailed summary of how users feel about customer service, mentioning both positive and negative aspects. Write at least 3 sentences.
+
+    Summary: <extra_id_0>
+
