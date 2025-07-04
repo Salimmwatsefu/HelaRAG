@@ -9,8 +9,8 @@ def load_config():
     # Config with user-specific file paths
     return {
         'data': {
-            'reviews_path': '/home/sjet/iwazolab/helarag/data/raw/reviews.csv',
-            'embeddings_path': '/home/sjet/iwazolab/helarag/data/processed/embeddings.faiss'
+            'reviews_path': os.path.join(base_dir, 'data', 'raw', 'reviews.csv'),
+            'embeddings_path': os.path.join(base_dir, 'data', 'processed', 'embeddings.faiss')
         },
         'model': {
             'name': 'helarag-finetuned-model'
