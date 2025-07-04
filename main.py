@@ -7,6 +7,7 @@ from transformers import pipeline
 
 def load_config():
     # Config with user-specific file paths
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     return {
         'data': {
             'reviews_path': os.path.join(base_dir, 'data', 'raw', 'reviews.csv'),
