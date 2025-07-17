@@ -6,3 +6,6 @@ transformers
 torch
 tqdm
 streamlit
+python-dotenv
+google-generativeai
+google-api-core
