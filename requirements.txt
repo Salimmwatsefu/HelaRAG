@@ -9,3 +9,4 @@ streamlit
 python-dotenv
 google-generativeai
 google-api-core
+openai
