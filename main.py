@@ -6,19 +6,25 @@ from datetime import datetime
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from transformers import pipeline
 import faiss
-import google.generativeai as genai # Corrected import for Generative AI
+import google.generativeai as genai
+from openai import OpenAI
 from difflib import get_close_matches
-import google.api_core.exceptions # Corrected import for exceptions
+import google.api_core.exceptions
 
-# Load .env first
+# --- Load Environment Variables ---
 load_dotenv()
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
 
-api_key = os.getenv("GEMINI_API_KEY")
+# Configure Gemini
+genai.configure(api_key=gemini_api_key)
 
-# Configure the genai library with your API key
-genai.configure(api_key=api_key)
+# Configure OpenAI client to use OpenRouter API endpoint
+openai_client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=openrouter_api_key,
+)
 
 # --- Global Cache ---
 helarag_doc_embeddings = None
@@ -45,7 +51,7 @@ def load_config():
         },
         'model': {
             'name': 'helarag-finetuned-model',
-            'gpt_name': 'gemini-2.5-flash'  # Gemini model
+            'gpt_name': 'gemini-2.5-flash'
         }
     }
 
@@ -72,7 +78,7 @@ def retrieve_documents(query, documents, config, faiss_index, top_k=5):
     distances, indices = faiss_index.search(query_embedding, top_k)
     results = []
     for i, dist in zip(indices[0], distances[0]):
-        similarity = 1 / (1 + dist)  # Convert L2 to similarity
+        similarity = 1 / (1 + dist)
         results.append((documents[i], similarity))
     return results
 
@@ -102,9 +108,46 @@ def helarag_retrieve(query, documents, model, config, top_k=5):
     top_indices = similarities.argsort()[::-1][:top_k]
     return [(documents[i], float(similarities[i])) for i in top_indices]
 
+# --- AI Model Retrievals ---
+def gemini_retrieve(query, model="gemini-2.5-flash"):
+    try:
+        model_instance = genai.GenerativeModel(model)
+        response = model_instance.generate_content(query)
+        return [(response.text.strip(), 1.0)]
+    except Exception as e:
+        print(f"⚠️ Gemini retrieval failed: {e}")
+        return []
+
+def openai_retrieve(query, model="openai/gpt-4o"):
+    extra_headers = {
+        "HTTP-Referer": "https://yourwebsite.com",
+        "X-Title": "HelaRAG Pipeline"
+    }
+    try:
+        response = openai_client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are an expert assistant helping with customer feedback analysis."},
+                {"role": "user", "content": query}
+            ],
+            max_tokens=300,
+            temperature=0.3,
+            extra_headers=extra_headers
+        )
+        answer = response.choices[0].message.content
+        return [(answer.strip(), 1.0)]
+    except Exception as e:
+        print(f"⚠️ OpenAI retrieval failed: {e}")
+        return []
+
 # --- Negotiation Layer ---
-def negotiate_context(faiss_results, helarag_results, strategy="weighted_top"):
+def negotiate_context(faiss_results, helarag_results, gemini_results=None, openai_results=None, strategy="weighted_top"):
     combined = faiss_results + helarag_results
+    if gemini_results:
+        combined += gemini_results
+    if openai_results:
+        combined += openai_results
+
     if strategy == "weighted_top":
         max_score = max([score for _, score in combined]) or 1.0
         combined = [(doc, score / max_score) for doc, score in combined]
@@ -117,68 +160,30 @@ def negotiate_context(faiss_results, helarag_results, strategy="weighted_top"):
         return [doc for doc, score in sorted_docs[:5]]
     return [doc for doc, _ in combined]
 
-# --- Gemini Generation ---
-def run_generation(query, context, config, model="gemini-2.5-flash", temperature=0.3, retries=3):
-    from time import sleep
-    prompt = f"""
-You are a domain assistant helping analyze customer feedback.
-Use the context below to answer the user query in a concise, helpful way.
-
+# --- Ensemble Answer Synthesis ---
+def ensemble_synthesis(query, faiss_docs, hela_docs, gemini_ans, openai_ans, model="gemini-2.5-flash"):
+    context = "\n".join([doc for doc, _ in faiss_docs + hela_docs])
+    combined = f"""
 Query: {query}
 
-Context:
+Context from FAISS + HelaRAG:
 {context}
 
-Your answer:
+Gemini Answer:
+{gemini_ans[0][0] if gemini_ans else 'N/A'}
+
+OpenAI Answer:
+{openai_ans[0][0] if openai_ans else 'N/A'}
+
+Please synthesize the final answer by combining the most relevant information.
 """
-    for attempt in range(retries):
-        try:
-            model_instance = genai.GenerativeModel(model)
-            response = model_instance.generate_content(prompt)
-            return response.text.strip(), [1.0]
-        except google.api_core.exceptions.QuotaExceeded as e: # Corrected exception path
-            print(f"Quota exceeded, retrying {attempt+1}/{retries}... {e}")
-            sleep(2 ** attempt)  # Exponential backoff
-        except genai.types.APIError as e: # Use genai.types.APIError for general Gemini API errors
-            if e.status_code == 429:  # Too Many Requests
-                print(f"Rate limit hit, retrying {attempt+1}/{retries}... {e}")
-                sleep(2 ** attempt)
-            else:
-                print(f"⚠️ Gemini API error: {e}")
-                return "Gemini API error occurred.", [0.0]
-        except Exception as e:
-            print(f"⚠️ Gemini generation failed: {e}")
-            return "Gemini generation failed.", [0.0]
-    return "❌ Failed after retries.", [0.0]
-
-
-# --- Response Optimization ---
-def optimize_response(query, response, config, model="gemini-2.5-flash", retries=3):
-    from time import sleep
-    prompt = f"""
-You are a writing assistant. Improve the following AI-generated response to make it more clear, professional, and human-sounding. Don't change the meaning or remove key information.
-
-Original Response:
-{response}
-
-Improved Response:
-"""
-    for attempt in range(retries):
-        try:
-            model = genai.GenerativeModel(model)
-            completion = model.generate_content(prompt)
-            return completion.text.strip()
-        except genai.types.APIError as e: # Use genai.types.APIError here as well
-            if e.status_code == 429:  # Too Many Requests
-                print(f"Rate limit hit, retrying {attempt+1}/{retries}... {e}")
-                sleep(2 ** attempt)  # Exponential backoff
-            else:
-                print(f"⚠️ Optimization failed: {e}")
-                return response
-        except Exception as e:
-            print(f"⚠️ Optimization failed: {e}")
-            return response
-    return response
+    try:
+        model_instance = genai.GenerativeModel(model)
+        response = model_instance.generate_content(combined)
+        return response.text.strip()
+    except Exception as e:
+        print(f"⚠️ Ensemble synthesis failed: {e}")
+        return gemini_ans[0][0] if gemini_ans else "No answer available."
 
 # --- KB2 Hook ---
 def check_knowledgebase2(query, threshold=0.7):
@@ -206,7 +211,7 @@ def log_feedback(query, context_docs, response, user_feedback=None, kb2_used=Fal
 
 # --- Full Pipeline ---
 def run_pipeline(query="What is the typical feedback on the loan application process across different apps?"):
-    print("\n🔄 Running HelaRAG Pipeline...\n")
+    print("\n🔄 Running HelaRAG Pipeline with Gemini + OpenRouter (OpenAI)...\n")
 
     config = load_config()
     try:
@@ -226,20 +231,18 @@ def run_pipeline(query="What is the typical feedback on the loan application pro
 
     faiss_results = retrieve_documents(query, domain_documents, config, faiss_index)
     helarag_results = helarag_retrieve(query, domain_documents, helarag_model, config)
+    gemini_results = gemini_retrieve(query)
+    openai_results = openai_retrieve(query)  # routed via OpenRouter
 
-    negotiated_context_docs = negotiate_context(faiss_results, helarag_results)
-    merged_context = "\n".join(negotiated_context_docs)
+    negotiated_context_docs = negotiate_context(
+        faiss_results, helarag_results,
+        gemini_results=gemini_results, openai_results=openai_results
+    )
 
-    draft_response, _ = run_generation(query, merged_context, config)
-    # Temporary: Skip optimize_response to stay within free tier limits
-    # optimized_response = optimize_response(query, draft_response, config)
-    optimized_response = draft_response  # Use draft_response directly
+    ensemble_answer = ensemble_synthesis(query, faiss_results, helarag_results, gemini_results, openai_results)
 
     kb2_response = check_knowledgebase2(query)
-    if kb2_response:
-        final_output = kb2_response
-    else:
-        final_output = optimized_response
+    final_output = kb2_response if kb2_response else ensemble_answer
 
     log_feedback(query, negotiated_context_docs, final_output, kb2_used=bool(kb2_response))
     return final_output, negotiated_context_docs, kb2_response
